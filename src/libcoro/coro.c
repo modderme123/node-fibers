@@ -90,10 +90,15 @@ coro_init (void)
   coro_transfer (new_coro, create_coro);
 
 #if __GCC_HAVE_DWARF2_CFI_ASM && __amd64
-  asm (".cfi_undefined rip");
+  /*asm (".cfi_startproc");*/
+  /*asm (".cfi_undefined rip");*/
 #endif
 
   func ((void *)arg);
+
+#if __GCC_HAVE_DWARF2_CFI_ASM && __amd64
+  /*asm (".cfi_endproc");*/
+#endif
 
   /* the new coro returned. bad. just abort() for now */
   abort ();
@@ -117,13 +122,20 @@ trampoline (int sig)
 
 # if CORO_ASM
 
+  #if __arm__ && \
+      (defined __ARM_ARCH_7__  || defined __ARM_ARCH_7A__ \
+    || defined __ARM_ARCH_7R__ || defined __ARM_ARCH_7M__ \
+    || __ARM_ARCH == 7)
+    #define CORO_ARM 1
+  #endif
+
   #if _WIN32 || __CYGWIN__
     #define CORO_WIN_TIB 1
   #endif
 
   asm (
        "\t.text\n"
-       #if _WIN32 || __CYGWIN__ || __APPLE__
+       #if _WIN32 || __CYGWIN__ || (defined(__APPLE__) && defined(__MACH__))
        "\t.globl _coro_transfer\n"
        "_coro_transfer:\n"
        #else
@@ -206,7 +218,7 @@ trampoline (int sig)
          "\tpopq %rcx\n"
          "\tjmpq *%rcx\n"
 
-       #elif __i386
+       #elif __i386__
 
          #define NUM_SAVED 4
          "\tpushl %ebp\n"
@@ -233,35 +245,113 @@ trampoline (int sig)
          "\tpopl %ebp\n"
          "\tpopl %ecx\n"
          "\tjmpl *%ecx\n"
+      #elif defined(__arm64) && defined(__APPLE__)
+        #define NUM_SAVED 20
+        "\tsub	sp, sp, #176\n"
+	      "\tstr	x30, [sp, #160]\n"
+        "\tstr  x29, [sp, #8]\n"
+        "\tstp  x19, x20, [sp,#16]\n"
+        "\tstp  x21, x22, [sp,#32]\n"
+        "\tstp  x23, x24, [sp,#48]\n"
+        "\tstp  x25, x26, [sp,#64]\n"
+        "\tstp  x27, x28, [sp,#80]\n"
+        "\tstp  d8, d9, [sp, #96]\n"
+        "\tstp  d10, d11, [sp, #112]\n"
+        "\tstp  d12, d13, [sp, #128]\n"
+        "\tstp  d14, d15, [sp, #144]\n"
+        "\tmov  x2, sp\n"
+        "\tstr  x2, [x0]\n"
+        "\tldr  x2, [x1]\n"
+        "\tmov  sp,  x2\n"
+        "\tldr	x29, [sp, #8]\n"
+        "\tldp	x19, x20, [sp, #16]\n"
+        "\tldp	x21, x22, [sp, #32]\n"
+        "\tldp	x23, x24, [sp, #48]\n"
+        "\tldp	x25, x26, [sp, #64]\n"
+        "\tldp	x27, x28, [sp, #80]\n"
+        "\tldp  d8,  d9,  [sp, #96]\n"
+        "\tldp  d10, d11, [sp, #112]\n"
+        "\tldp  d12, d13, [sp, #128]\n"
+        "\tldp  d14, d15, [sp, #144]\n"
+        "\tldr	x30, [sp, #160]\n"
+	      "\tadd	sp, sp, #176\n"
+        "\tret\n"
 
-       #elif __arm64
-         #define NUM_SAVED 18
-         "stp lr, fp, [sp, #-20*8]!\n"
-         "stp d8, d9, [sp, #2*8]\n"
-         "stp d10, d11, [sp, #4*8]\n"
-         "stp d12, d13, [sp, #6*8]\n"
-         "stp d14, d15, [sp, #8*8]\n"
-         "stp x19, x20, [sp, #10*8]\n"
-         "stp x21, x22, [sp, #12*8]\n"
-         "stp x23, x24, [sp, #14*8]\n"
-         "stp x25, x26, [sp, #16*8]\n"
-         "stp x27, x28, [sp, #18*8]\n"
 
-         "mov x9, sp\n"
-         "str x9, [x0]\n"
-         "ldr x9, [x1]\n"
-         "mov sp, x9\n"
+       #elif CORO_ARM /* untested, what about thumb, neon, iwmmxt? */
 
-         "ldp x27, x28, [sp, #18*8]\n"
-         "ldp x25, x26, [sp, #16*8]\n"
-         "ldp x23, x24, [sp, #14*8]\n"
-         "ldp x21, x22, [sp, #12*8]\n"
-         "ldp x19, x20, [sp, #10*8]\n"
-         "ldp d14, d15, [sp, #8*8]\n"
-         "ldp d12, d13, [sp, #6*8]\n"
-         "ldp d10, d11, [sp, #4*8]\n"
-         "ldp d8, d9, [sp, #2*8]\n"
-         "ldp lr, fp, [sp], #20*8\n"
+         #if __ARM_PCS_VFP
+           "\tvpush {d8-d15}\n"
+           #define NUM_SAVED (9 + 8 * 2)
+         #else
+           #define NUM_SAVED 9
+         #endif
+         "\tpush {r4-r11,lr}\n"
+         "\tstr sp, [r0]\n"
+         "\tldr sp, [r1]\n"
+         "\tpop {r4-r11,lr}\n"
+         #if __ARM_PCS_VFP
+           "\tvpop {d8-d15}\n"
+         #endif
+         "\tmov r15, lr\n"
+
+       #elif __mips__ && 0 /* untested, 32 bit only */
+
+        #define NUM_SAVED (12 + 8 * 2)
+         /* TODO: n64/o64, lw=>ld */
+
+         "\t.set    nomips16\n"
+         "\t.frame  $sp,112,$31\n"
+         #if __mips_soft_float
+           "\taddiu   $sp,$sp,-44\n"
+         #else
+           "\taddiu   $sp,$sp,-112\n"
+           "\ts.d     $f30,88($sp)\n"
+           "\ts.d     $f28,80($sp)\n"
+           "\ts.d     $f26,72($sp)\n"
+           "\ts.d     $f24,64($sp)\n"
+           "\ts.d     $f22,56($sp)\n"
+           "\ts.d     $f20,48($sp)\n"
+         #endif
+         "\tsw      $28,40($sp)\n"
+         "\tsw      $31,36($sp)\n"
+         "\tsw      $fp,32($sp)\n"
+         "\tsw      $23,28($sp)\n"
+         "\tsw      $22,24($sp)\n"
+         "\tsw      $21,20($sp)\n"
+         "\tsw      $20,16($sp)\n"
+         "\tsw      $19,12($sp)\n"
+         "\tsw      $18,8($sp)\n"
+         "\tsw      $17,4($sp)\n"
+         "\tsw      $16,0($sp)\n"
+         "\tsw      $sp,0($4)\n"
+         "\tlw      $sp,0($5)\n"
+         #if !__mips_soft_float
+           "\tl.d     $f30,88($sp)\n"
+           "\tl.d     $f28,80($sp)\n"
+           "\tl.d     $f26,72($sp)\n"
+           "\tl.d     $f24,64($sp)\n"
+           "\tl.d     $f22,56($sp)\n"
+           "\tl.d     $f20,48($sp)\n"
+         #endif
+         "\tlw      $28,40($sp)\n"
+         "\tlw      $31,36($sp)\n"
+         "\tlw      $fp,32($sp)\n"
+         "\tlw      $23,28($sp)\n"
+         "\tlw      $22,24($sp)\n"
+         "\tlw      $21,20($sp)\n"
+         "\tlw      $20,16($sp)\n"
+         "\tlw      $19,12($sp)\n"
+         "\tlw      $18,8($sp)\n"
+         "\tlw      $17,4($sp)\n"
+         "\tlw      $16,0($sp)\n"
+         "\tj       $31\n"
+         #if __mips_soft_float
+           "\taddiu   $sp,$sp,44\n"
+         #else
+           "\taddiu   $sp,$sp,112\n"
+         #endif
+
        #else
          #error unsupported architecture
        #endif
@@ -341,10 +431,10 @@ coro_create (coro_context *ctx, coro_func coro, void *arg, void *sptr, size_t ss
 # elif CORO_LOSER
 
   coro_setjmp (ctx->env);
-  #if __CYGWIN__ && __i386
+  #if __CYGWIN__ && __i386__
     ctx->env[8]                        = (long)    coro_init;
     ctx->env[7]                        = (long)    ((char *)sptr + ssize)         - sizeof (long);
-  #elif __CYGWIN__ && __x86_64
+  #elif __CYGWIN__ && __x86_64__
     ctx->env[7]                        = (long)    coro_init;
     ctx->env[6]                        = (long)    ((char *)sptr + ssize)         - sizeof (long);
   #elif defined __MINGW32__
@@ -375,7 +465,7 @@ coro_create (coro_context *ctx, coro_func coro, void *arg, void *sptr, size_t ss
   #elif defined (__GNU_LIBRARY__) && defined (__i386__)
     ctx->env[0].__jmpbuf[0].__pc       = (char *)  coro_init;
     ctx->env[0].__jmpbuf[0].__sp       = (void *)  ((char *)sptr + ssize)         - sizeof (long);
-  #elif defined (__GNU_LIBRARY__) && defined (__amd64__)
+  #elif defined (__GNU_LIBRARY__) && defined (__x86_64__)
     ctx->env[0].__jmpbuf[JB_PC]        = (long)    coro_init;
     ctx->env[0].__jmpbuf[0].__sp       = (void *)  ((char *)sptr + ssize)         - sizeof (long);
   #else
@@ -390,18 +480,33 @@ coro_create (coro_context *ctx, coro_func coro, void *arg, void *sptr, size_t ss
 
 # elif CORO_ASM
 
-  ctx->sp = (void **)(ssize + (char *)sptr);
-  *--ctx->sp = (void *)abort; /* needed for alignment only */
-  *--ctx->sp = (void *)coro_init;
-
-  #if CORO_WIN_TIB
-  *--ctx->sp = 0;                    /* ExceptionList */
-  *--ctx->sp = (char *)sptr + ssize; /* StackBase */
-  *--ctx->sp = sptr;                 /* StackLimit */
+  #if __i386__ || __x86_64__ || (defined(__arm64) && defined(__APPLE__))
+    ctx->sp = (void **)(ssize + (char *)sptr);
+    *--ctx->sp = (void *)abort; /* needed for alignment only */
+    *--ctx->sp = (void *)coro_init;
+    #if CORO_WIN_TIB
+      *--ctx->sp = 0;                    /* ExceptionList */
+      *--ctx->sp = (char *)sptr + ssize; /* StackBase */
+      *--ctx->sp = sptr;                 /* StackLimit */
+    #endif
+  #elif CORO_ARM
+    /* return address stored in lr register, don't push anything */
+  #else
+    #error unsupported architecture
   #endif
 
   ctx->sp -= NUM_SAVED;
   memset (ctx->sp, 0, sizeof (*ctx->sp) * NUM_SAVED);
+
+  #if __i386__ || __x86_64__ || (defined(__arm64) && defined(__APPLE__))
+    /* done already */
+  #elif CORO_ARM
+    ctx->sp[0] = coro; /* r4 */
+    ctx->sp[1] = arg;  /* r5 */
+    ctx->sp[8] = (char *)coro_init; /* lr */
+  #else
+    #error unsupported architecture
+  #endif
 
 # elif CORO_UCONTEXT
 
@@ -434,15 +539,6 @@ struct coro_init_args
   coro_context *self, *main;
 };
 
-static pthread_t null_tid;
-
-/* I'd so love to cast pthread_mutex_unlock to void (*)(void *)... */
-static void
-mutex_unlock_wrapper (void *arg)
-{
-  pthread_mutex_unlock ((pthread_mutex_t *)arg);
-}
-
 static void *
 coro_init (void *args_)
 {
@@ -450,13 +546,8 @@ coro_init (void *args_)
   coro_func func = args->func;
   void *arg = args->arg;
 
-  pthread_mutex_lock (&coro_mutex);
-
-  /* we try to be good citizens and use deferred cancellation and cleanup handlers */
-  pthread_cleanup_push (mutex_unlock_wrapper, &coro_mutex);
-    coro_transfer (args->self, args->main);
-    func (arg);
-  pthread_cleanup_pop (1);
+  coro_transfer (args->self, args->main);
+  func (arg);
 
   return 0;
 }
@@ -464,11 +555,25 @@ coro_init (void *args_)
 void
 coro_transfer (coro_context *prev, coro_context *next)
 {
+  pthread_mutex_lock (&coro_mutex);
+
+  next->flags = 1;
   pthread_cond_signal (&next->cv);
-  pthread_cond_wait (&prev->cv, &coro_mutex);
-#if __FreeBSD__ /* freebsd is of course broken and needs manual testcancel calls... yay... */
-  pthread_testcancel ();
-#endif
+
+  prev->flags = 0;
+
+  while (!prev->flags)
+    pthread_cond_wait (&prev->cv, &coro_mutex);
+
+  if (prev->flags == 2)
+    {
+      pthread_mutex_unlock (&coro_mutex);
+      pthread_cond_destroy (&prev->cv);
+      pthread_detach (pthread_self ());
+      pthread_exit (0);
+    }
+
+  pthread_mutex_unlock (&coro_mutex);
 }
 
 void
@@ -481,9 +586,7 @@ coro_create (coro_context *ctx, coro_func coro, void *arg, void *sptr, size_t ss
     {
       once = 1;
 
-      pthread_mutex_lock (&coro_mutex);
       pthread_cond_init (&nctx.cv, 0);
-      null_tid = pthread_self ();
     }
 
   pthread_cond_init (&ctx->cv, 0);
@@ -492,6 +595,7 @@ coro_create (coro_context *ctx, coro_func coro, void *arg, void *sptr, size_t ss
     {
       pthread_attr_t attr;
       struct coro_init_args args;
+      pthread_t id;
 
       args.func = coro;
       args.arg  = arg;
@@ -509,26 +613,19 @@ coro_create (coro_context *ctx, coro_func coro, void *arg, void *sptr, size_t ss
       pthread_attr_setstack (&attr, sptr, (size_t)ssize);
 #endif
       pthread_attr_setscope (&attr, PTHREAD_SCOPE_PROCESS);
-      pthread_create (&ctx->id, &attr, coro_init, &args);
+      pthread_create (&id, &attr, coro_init, &args);
 
       coro_transfer (args.main, args.self);
     }
-  else
-    ctx->id = null_tid;
 }
 
 void
 coro_destroy (coro_context *ctx)
 {
-  if (!pthread_equal (ctx->id, null_tid))
-    {
-      pthread_cancel (ctx->id);
-      pthread_mutex_unlock (&coro_mutex);
-      pthread_join (ctx->id, 0);
-      pthread_mutex_lock (&coro_mutex);
-    }
-
-  pthread_cond_destroy (&ctx->cv);
+  pthread_mutex_lock (&coro_mutex);
+  ctx->flags = 2;
+  pthread_cond_signal (&ctx->cv);
+  pthread_mutex_unlock (&coro_mutex);
 }
 
 /*****************************************************************************/
@@ -630,7 +727,7 @@ coro_destroy (coro_context *ctx)
 # undef CORO_GUARDPAGES
 #endif
 
-#if !__i386 && !__x86_64 && !__powerpc && !__m68k && !__alpha && !__mips && !__sparc64
+#if !__i386__ && !__x86_64__ && !__powerpc__ && !__arm__ && !__aarch64__ && !__m68k__ && !__alpha__ && !__mips__ && !__sparc64__
 # undef CORO_GUARDPAGES
 #endif
 
@@ -677,15 +774,16 @@ coro_stack_alloc (struct coro_stack *stack, unsigned int size)
   void *base;
 
   #if CORO_MMAP
-    int mflags = MAP_PRIVATE | MAP_ANONYMOUS;
-  #if defined(__OpenBSD__) || defined(__FreeBSD__)
-    mflags |= MAP_STACK;
-  #endif
     /* mmap supposedly does allocate-on-write for us */
-    base = mmap (0, ssze, PROT_READ | PROT_WRITE, mflags, -1, 0);
+    base = mmap (0, ssze, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (base == (void *)-1)
       {
+        /* some systems don't let us have executable heap */
+        /* we assume they won't need executable stack in that case */
+        base = mmap (0, ssze, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+        if (base == (void *)-1)
           return 0;
       }
 
