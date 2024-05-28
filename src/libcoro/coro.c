@@ -248,7 +248,7 @@ trampoline (int sig)
       #elif defined(__arm64) && defined(__APPLE__)
         #define NUM_SAVED 20
         "\tsub	sp, sp, #176\n"
-	      "\tstr	x30, [sp, #160]\n"
+	    "\tstr	x30, [sp, #160]\n"
         "\tstr  x29, [sp, #8]\n"
         "\tstp  x19, x20, [sp,#16]\n"
         "\tstp  x21, x22, [sp,#32]\n"
@@ -274,7 +274,7 @@ trampoline (int sig)
         "\tldp  d12, d13, [sp, #128]\n"
         "\tldp  d14, d15, [sp, #144]\n"
         "\tldr	x30, [sp, #160]\n"
-	      "\tadd	sp, sp, #176\n"
+	    "\tadd	sp, sp, #176\n"
         "\tret\n"
 
 
@@ -294,63 +294,6 @@ trampoline (int sig)
            "\tvpop {d8-d15}\n"
          #endif
          "\tmov r15, lr\n"
-
-       #elif __mips__ && 0 /* untested, 32 bit only */
-
-        #define NUM_SAVED (12 + 8 * 2)
-         /* TODO: n64/o64, lw=>ld */
-
-         "\t.set    nomips16\n"
-         "\t.frame  $sp,112,$31\n"
-         #if __mips_soft_float
-           "\taddiu   $sp,$sp,-44\n"
-         #else
-           "\taddiu   $sp,$sp,-112\n"
-           "\ts.d     $f30,88($sp)\n"
-           "\ts.d     $f28,80($sp)\n"
-           "\ts.d     $f26,72($sp)\n"
-           "\ts.d     $f24,64($sp)\n"
-           "\ts.d     $f22,56($sp)\n"
-           "\ts.d     $f20,48($sp)\n"
-         #endif
-         "\tsw      $28,40($sp)\n"
-         "\tsw      $31,36($sp)\n"
-         "\tsw      $fp,32($sp)\n"
-         "\tsw      $23,28($sp)\n"
-         "\tsw      $22,24($sp)\n"
-         "\tsw      $21,20($sp)\n"
-         "\tsw      $20,16($sp)\n"
-         "\tsw      $19,12($sp)\n"
-         "\tsw      $18,8($sp)\n"
-         "\tsw      $17,4($sp)\n"
-         "\tsw      $16,0($sp)\n"
-         "\tsw      $sp,0($4)\n"
-         "\tlw      $sp,0($5)\n"
-         #if !__mips_soft_float
-           "\tl.d     $f30,88($sp)\n"
-           "\tl.d     $f28,80($sp)\n"
-           "\tl.d     $f26,72($sp)\n"
-           "\tl.d     $f24,64($sp)\n"
-           "\tl.d     $f22,56($sp)\n"
-           "\tl.d     $f20,48($sp)\n"
-         #endif
-         "\tlw      $28,40($sp)\n"
-         "\tlw      $31,36($sp)\n"
-         "\tlw      $fp,32($sp)\n"
-         "\tlw      $23,28($sp)\n"
-         "\tlw      $22,24($sp)\n"
-         "\tlw      $21,20($sp)\n"
-         "\tlw      $20,16($sp)\n"
-         "\tlw      $19,12($sp)\n"
-         "\tlw      $18,8($sp)\n"
-         "\tlw      $17,4($sp)\n"
-         "\tlw      $16,0($sp)\n"
-         "\tj       $31\n"
-         #if __mips_soft_float
-           "\taddiu   $sp,$sp,44\n"
-         #else
-           "\taddiu   $sp,$sp,112\n"
-         #endif
 
        #else
          #error unsupported architecture
