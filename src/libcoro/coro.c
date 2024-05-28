@@ -234,6 +234,34 @@ trampoline (int sig)
          "\tpopl %ecx\n"
          "\tjmpl *%ecx\n"
 
+       #elif __arm64
+         #define NUM_SAVED 18
+         "stp lr, fp, [sp, #-20*8]!\n"
+         "stp d8, d9, [sp, #2*8]\n"
+         "stp d10, d11, [sp, #4*8]\n"
+         "stp d12, d13, [sp, #6*8]\n"
+         "stp d14, d15, [sp, #8*8]\n"
+         "stp x19, x20, [sp, #10*8]\n"
+         "stp x21, x22, [sp, #12*8]\n"
+         "stp x23, x24, [sp, #14*8]\n"
+         "stp x25, x26, [sp, #16*8]\n"
+         "stp x27, x28, [sp, #18*8]\n"
+
+         "mov x9, sp\n"
+         "str x9, [x0]\n"
+         "ldr x9, [x1]\n"
+         "mov sp, x9\n"
+
+         "ldp x27, x28, [sp, #18*8]\n"
+         "ldp x25, x26, [sp, #16*8]\n"
+         "ldp x23, x24, [sp, #14*8]\n"
+         "ldp x21, x22, [sp, #12*8]\n"
+         "ldp x19, x20, [sp, #10*8]\n"
+         "ldp d14, d15, [sp, #8*8]\n"
+         "ldp d12, d13, [sp, #6*8]\n"
+         "ldp d10, d11, [sp, #4*8]\n"
+         "ldp d8, d9, [sp, #2*8]\n"
+         "ldp lr, fp, [sp], #20*8\n"
        #else
          #error unsupported architecture
        #endif
@@ -703,4 +731,3 @@ coro_stack_free (struct coro_stack *stack)
 }
 
 #endif
-

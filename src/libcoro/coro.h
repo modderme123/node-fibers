@@ -303,9 +303,9 @@ void coro_stack_free (struct coro_stack *stack);
 #  define CORO_ASM 1
 # elif defined WINDOWS || defined _WIN32
 #  define CORO_LOSER 1 /* you don't win with windoze */
-# elif __linux && (__i386 || (__x86_64 && !__ILP32))
+# elif __linux && (__i386 || (__x86_64 && !__ILP32) || __arm64)
 #  define CORO_ASM 1
-# elif __APPLE__ && (__i386 || (__x86_64 && !__ILP32))
+# elif __APPLE__ && (__i386 || (__x86_64 && !__ILP32) || __arm64)
 #  define CORO_ASM 1
 # elif defined HAVE_UCONTEXT_H
 #  define CORO_UCONTEXT 1
@@ -377,7 +377,11 @@ struct coro_context
   void **sp; /* must be at offset 0 */
 };
 
+# if defined __i386 || defined __x86_64 || defined _M_IX86 || defined _M_AMD64
 void __attribute__ ((__noinline__, __regparm__(2)))
+# else
+void __attribute__ ((__noinline__))
+# endif
 coro_transfer (coro_context *prev, coro_context *next);
 
 # define coro_destroy(ctx) (void *)(ctx)
@@ -417,4 +421,3 @@ void coro_destroy (coro_context *ctx);
 #endif
 
 #endif
-
